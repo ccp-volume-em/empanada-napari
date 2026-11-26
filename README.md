@@ -33,7 +33,9 @@ raise an [issue here instead](https://github.com/napari/napari/issues).
 
 ## Implemented Models
 
-  - *MitoNet*: A generalist mitochondrial instance segmentation model.
+  - *MitoNet*: A generalist mitochondrial instance segmentation model
+  - *NucleoNet*: A base model for EM instance nucleus segmentation
+  - *DropNet*: A base model for EM Lipid Droplet instance segmentation
 
 ## Example Datasets
 
@@ -44,47 +46,72 @@ Volume EM datasets for benchmarking mitochondrial instance segmentation are avai
 
 ### New Users
 
-If you've previously installed and used conda, it's recommended (but optional) to create a new virtual 
-environment in order to avoid dependency conflicts. 
+empanada-napari requires **Python ≥ 3.12** and **napari ≥ 0.9** (including 0.10.x).
 
-empanada-napari works with python=3.10 to 3.13, and napari<=0.6.6
-
-It's recommended to have installed napari through [conda](https://docs.conda.io/en/latest/miniconda.html). Then to install this plugin:
+#### pip
 
 ```shell
-pip install empanada-napari
+python3.12 -m venv empanada-env
+source empanada-env/bin/activate   # Windows: empanada-env\Scripts\activate
+python -m pip install -U pip
+python -m pip install "napari[all]>=0.9"
+python -m pip install empanada-napari
 ```
 
-Launch napari:
+#### conda
 
 ```shell
-napari
+conda create -n empanada-env python=3.12 -y
+conda activate empanada-env
+python -m pip install -U pip
+python -m pip install "napari[all]>=0.9"
+python -m pip install empanada-napari
 ```
 
-Look for empanada-napari under the "Plugins" menu.
+Launch napari from the same environment:
+
+```shell
+python -m napari
+```
+
+Prefer `python -m napari` over bare `napari` so the plugin loads from this environment (some systems still have an older `napari` earlier on `PATH`).
+
+Look for **empanada-napari** under the Plugins menu.
 
 
 ### Returning Users
 
-If you installed napari into a virtual environment as suggested in the original release documentation, 
-be sure to activate it and uninstall the old empanada-napari.
+Create or activate a Python 3.12+ environment, then upgrade:
 
 ```shell
-pip uninstall empanada-napari
+conda activate empanada-env
+python -m pip install -U "napari[all]>=0.9" empanada-napari
+python -m napari
 ```
 
-Then install the newest version:
+Older installs on Python 3.10–3.11 or napari 0.6.x are not compatible with this release. Use a new 3.12+ environment instead of upgrading in place.
+
+
+### Development
+
+Clone the repository, then:
 
 ```shell
-pip install empanada-napari
+conda create -n empanada-dev python=3.12 -y
+conda activate empanada-dev
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+python -m napari   # launch napari with the plugin
+pytest             # run the tests
 ```
+
 
 
 ![empanada](images/demo.gif)
 
 ## GPU Support
 
-**Note: Mac doesn't support NVIDIA GPUS. This section only applies to Windows and Linux systems.**
+**Note: Apple Silicon GPUs are supported through torch's MPS backend when available. The setup instructions below apply to NVIDIA GPUs on Windows and Linux.**
 
 As for any deep learning models, having a GPU installed on your system will significantly
 increase model throughput (although we ship CPU optimized versions of all models with the plugin).
@@ -102,18 +129,13 @@ nvidia-smi
 If this returns "command not found" then you need to [install the driver from NVIDIA](https://www.nvidia.com/download/index.aspx). Instead, if
 if the driver is installed correctly, you may need to switch to the GPU enabled version of torch.
 
-First, uninstall the current version of torch:
+Reinstall torch with a CUDA build matching your system using the selector at
+[pytorch.org](https://pytorch.org/get-started/locally/), for example:
 
 ```shell
-pip uninstall torch
+pip install --upgrade --force-reinstall torch torchvision
 ```
 
-Then [install torch >= 1.10 using conda for your system](https://pytorch.org/get-started/locally/).
-This command should work:
-
-```shell
-conda install pytorch cudatoolkit -c pytorch
-```
 
 ## Citing this work
 

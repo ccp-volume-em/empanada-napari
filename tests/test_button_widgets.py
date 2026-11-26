@@ -120,14 +120,14 @@ class TestSliceInference:
         # image coordinate (30, 50) is between the two cells
         assert not mask[20, 35]
 
-    def test_roi_prefers_shapes_over_labels(self, image_2d):
+    def test_roi_honors_selected_layer_over_shapes(self, image_2d):
         viewer = ViewerModel()
         image_layer = viewer.add_image(image_2d)
         labels = np.zeros(image_2d.shape, dtype=np.int32)
         labels[10:25, 15:40] = 1
         labels_layer = viewer.add_labels(labels)
         triangle = np.array([[11, 13], [30, 6], [30, 20]])
-        shapes_layer = viewer.add_shapes(triangle, shape_type="polygon", edge_width=5)
+        viewer.add_shapes(triangle, shape_type="polygon", edge_width=5)
 
         widget = SliceInferenceWidget(
             viewer=viewer,
@@ -136,7 +136,91 @@ class TestSliceInference:
             confine_to_roi=True,
             roi_layer=labels_layer,
         )
+        assert widget._resolve_roi_layer() is labels_layer
+
+    def test_roi_falls_back_to_shapes_when_none_selected(self, image_2d):
+        viewer = ViewerModel()
+        image_layer = viewer.add_image(image_2d)
+        labels = np.zeros(image_2d.shape, dtype=np.int32)
+        labels[10:25, 15:40] = 1
+        viewer.add_labels(labels)
+        triangle = np.array([[11, 13], [30, 6], [30, 20]])
+        shapes_layer = viewer.add_shapes(triangle, shape_type="polygon", edge_width=5)
+
+        widget = SliceInferenceWidget(
+            viewer=viewer,
+            image_layer=image_layer,
+            model_config=MODEL_NAMES['MitoNet_mini'],
+            confine_to_roi=True,
+            roi_layer=None,
+        )
         assert widget._resolve_roi_layer() is shapes_layer
+
+    def test_roi_dropdown_hidden_until_confine_checked(self, qtbot):
+        from empanada_napari._slice_inference import slice_inference_widget
+
+        widget = slice_inference_widget()
+        qtbot.addWidget(widget.native)
+        # magicgui .visible uses QWidget.isVisible() (False until the window is shown)
+        assert widget.roi_layer.native.isHidden()
+
+        widget.confine_to_roi.value = True
+        assert not widget.roi_layer.native.isHidden()
+
+        widget.confine_to_roi.value = False
+        assert widget.roi_layer.native.isHidden()
+
+    def test_roi_slice_from_shapes_on_3d_volume(self, image_2d):
+        """Confine-to-ROI on a 3D volume should use the current plane, not require a 2D image."""
+        viewer = ViewerModel()
+        volume = np.broadcast_to(image_2d, (8,) + image_2d.shape).copy()
+        image_layer = viewer.add_image(volume)
+        viewer.dims.current_step = (3, 0, 0)
+        viewer.cursor.position = (3, 50, 50)
+
+        rect = np.array([
+            [3, 10, 15],
+            [3, 10, 30],
+            [3, 25, 30],
+            [3, 25, 15],
+        ], dtype=float)
+        shapes_layer = viewer.add_shapes(rect, shape_type="polygon")
+
+        widget = SliceInferenceWidget(
+            viewer=viewer,
+            image_layer=image_layer,
+            model_config=MODEL_NAMES['MitoNet_mini'],
+            confine_to_roi=True,
+            roi_layer=shapes_layer,
+        )
+
+        roi, min_y, min_x, max_y, max_x, mask = widget._get_roi_slice(image_layer, shapes_layer)
+        assert roi.ndim == 2
+        assert (min_y, min_x, max_y, max_x) == (10, 15, 25, 30)
+        assert roi.shape == (15, 15)
+        assert mask.shape == roi.shape
+
+    def test_roi_slice_from_labels_on_3d_volume(self, image_2d):
+        viewer = ViewerModel()
+        volume = np.broadcast_to(image_2d, (8,) + image_2d.shape).copy()
+        image_layer = viewer.add_image(volume)
+        viewer.dims.current_step = (3, 0, 0)
+        viewer.cursor.position = (3, 50, 50)
+
+        labels = np.zeros(volume.shape, dtype=np.int32)
+        labels[3, 10:25, 15:40] = 1
+        labels_layer = viewer.add_labels(labels)
+
+        widget = SliceInferenceWidget(
+            viewer=viewer,
+            image_layer=image_layer,
+            model_config=MODEL_NAMES['MitoNet_mini'],
+            confine_to_roi=True,
+            roi_layer=labels_layer,
+        )
+        roi, min_y, min_x, max_y, max_x, mask = widget._get_roi_slice(image_layer, labels_layer)
+        assert (min_y, min_x, max_y, max_x) == (10, 15, 25, 40)
+        assert roi.shape == (15, 25)
 
 
     @pytest.mark.slow

@@ -3,7 +3,6 @@ import yaml
 import os
 import platform
 from typing import Any
-from napari_plugin_engine import napari_hook_implementation
 
 import numpy as np
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QPlainTextEdit
@@ -71,10 +70,15 @@ def finetuning_widget():
         train_dir = str(train_dir)
         model_dir = str(model_dir)
 
-        if str(eval_dir) == '.':
+        # FileEdit defaults to Path('.') when left empty
+        eval_dir = str(eval_dir)
+        if eval_dir in ('.', '', 'None'):
             eval_dir = None
 
         assert os.path.isdir(train_dir)
+        if eval_dir is not None:
+            assert os.path.isdir(eval_dir), \
+                f'Validation directory does not exist: {eval_dir}'
 
         custom_config = str(custom_config)
         if custom_config != 'default config':
@@ -118,10 +122,23 @@ def finetuning_widget():
             for k in aug.keys():
                 aug[k] = patch_size if ('height' in k or 'width' in k) and aug.get(k) is None else aug[k]
 
-        config['TRAIN']['save_freq'] = epochs // 5
+        # epochs can be < 5 when iterations is small relative to
+        # dataset size; never allow a 0 divisor (ZeroDivisionError
+        # during the train/validate loop).
+        config['TRAIN']['save_freq'] = max(1, epochs // 5)
         config['EVAL']['eval_dir'] = eval_dir
-        # only run validation 5 times
-        config['EVAL']['epochs_per_eval'] = epochs // 5
+        config['EVAL']['epochs_per_eval'] = max(1, epochs // 5)
+
+        if eval_dir is not None:
+            n_eval = len(glob(os.path.join(eval_dir, '**/images/*')))
+            if not n_eval:
+                raise Exception(
+                    f'No images found in validation directory '
+                    f'{os.path.join(eval_dir, "**/images/*")}. '
+                    f'Expected the same layout as training data: '
+                    f'<dir>/<dataset>/images and <dir>/<dataset>/masks.'
+                )
+            print(f'Found {n_eval} images for validation.')
 
         if 'epochs' in config['TRAIN']['schedule_params']:
             config['TRAIN']['schedule_params']['epochs'] = epochs
@@ -202,11 +219,3 @@ def get_info_widget():
             print(f'    Class {cl} ({cn}) requires {kind} segmentation, start annotation at label {start_label}')
 
     return widget
-
-@napari_hook_implementation(specname='napari_experimental_provide_dock_widget')
-def finetuning_dock_widget():
-    return finetuning_widget, {'name': 'Finetune a model'}
-
-@napari_hook_implementation(specname='napari_experimental_provide_dock_widget')
-def get_info_dock_widget():
-    return get_info_widget, {'name': 'Get model info'}

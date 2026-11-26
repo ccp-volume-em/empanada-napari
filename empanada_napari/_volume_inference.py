@@ -4,14 +4,12 @@ import napari
 from napari import Viewer
 from napari.layers import Image
 from napari.qt.threading import thread_worker
-from napari_plugin_engine import napari_hook_implementation
 from magicgui import magicgui, widgets
 from qtpy.QtWidgets import QScrollArea
 
 import zarr
 import dask.array as da
 import torch
-from torch.cuda import device_count
 from torch.backends.quantized import engine, supported_engines
 from empanada_napari.inference import Engine3d, tracker_consensus, stack_postprocessing
 from empanada_napari.multigpu import MultiGPUEngine3d
@@ -363,8 +361,7 @@ class VolumeInferenceWidget:
 
 def volume_inference_widget():
     # Import when users activate plugin
-    from torch.cuda import device_count
-    from empanada_napari.utils import get_configs, abspath, enable_layer_rename_refresh
+    from empanada_napari.utils import get_configs, abspath, enable_layer_rename_refresh, get_device
 
     logo = abspath(__file__, 'resources/empanada_logo.png')
     model_configs = get_configs()
@@ -377,9 +374,9 @@ def volume_inference_widget():
 
         model_config=dict(widget_type='ComboBox', label='model', choices=list(model_configs.keys()),
                           value=list(model_configs.keys())[0], tooltip='Model to use for inference'),
-        use_gpu=dict(widget_type='CheckBox', text='Use GPU', value=device_count() >= 1,
-                     tooltip='If checked, run on GPU 0'),
-        use_quantized=dict(widget_type='CheckBox', text='Use quantized model', value=device_count()==0 and quantized_supported,
+        use_gpu=dict(widget_type='CheckBox', text='Use GPU', value=get_device().type != 'cpu',
+                     tooltip='If checked, run on GPU (CUDA or Apple MPS)'),
+        use_quantized=dict(widget_type='CheckBox', text='Use quantized model', value=get_device().type == 'cpu' and quantized_supported,
                            tooltip='If checked, use the quantized model for faster CPU inference.'),
         multigpu=dict(widget_type='CheckBox', text='Multi GPU', value=False,
                       tooltip='If checked, run on all available GPUs'),
@@ -518,6 +515,5 @@ def volume_inference_widget():
     return widget
 
 
-@napari_hook_implementation(specname='napari_experimental_provide_dock_widget')
 def volume_dock_widget():
     return volume_inference_widget, {'name': '3D Inference'}

@@ -2,11 +2,13 @@ import os, sys, time, yaml
 import numpy as np
 import requests
 import torch
+import zipfile
 from pathlib import Path
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 from empanada.config_loaders import read_yaml
+from empanada.inference.contiguous_encoder import wrap_contiguous_encoder_features
 import warnings
 import contextlib
 import json
@@ -48,6 +50,7 @@ def no_ssl_verification():
 __all__ = [
     'abspath'
     'get_configs',
+    'get_device',
     'Preprocessor',
     'enable_layer_rename_refresh'
 ]
@@ -89,16 +92,39 @@ _RETRYABLE_DOWNLOAD_ERRORS = (
 )
 
 
+def _is_complete_zip(path):
+    r"""Return True when ``path`` is a zip whose central directory can be read.
+
+    TorchScript checkpoints are zip archives. A connection that closes early
+    still leaves a file on disk, and ``torch.hub.download_url_to_file`` treats
+    that short read as success. Loading it later fails with
+    "failed finding central directory".
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            archive.namelist()
+    except (zipfile.BadZipFile, OSError, EOFError):
+        return False
+    return True
+
+
 def _download_with_retries(url, cached_file, max_retries=4, initial_backoff=2.0):
     r"""Downloads a file via torch.hub, retrying transient network errors
     (e.g. 502/504 gateway errors from a flaky CDN) with exponential backoff
     before giving up.
+
+    A finished download that is not a complete zip is treated as a failed
+    attempt so a truncated checkpoint is not cached.
     """
     hash_prefix = None
     for attempt in range(1, max_retries + 1):
         try:
             with no_ssl_verification():
                 torch.hub.download_url_to_file(url, cached_file, hash_prefix, progress=True)
+            if not _is_complete_zip(cached_file):
+                raise OSError(
+                    f'Downloaded weights are truncated (not a complete zip): {cached_file}'
+                )
             return
         except _RETRYABLE_DOWNLOAD_ERRORS as exc:
             # remove any partially-downloaded file so a retry starts fresh
@@ -119,10 +145,40 @@ def _download_with_retries(url, cached_file, max_retries=4, initial_backoff=2.0)
             time.sleep(wait_s)
 
 
+def get_device(use_gpu=True):
+    r"""Select CUDA, then Apple MPS, or CPU when GPU use is disabled."""
+    if use_gpu:
+        if torch.cuda.is_available():
+            return torch.device('cuda:0')
+        mps = getattr(torch.backends, 'mps', None)
+        if mps is not None and mps.is_available():
+            return torch.device('mps')
+    return torch.device('cpu')
+
+
+def _load_torchscript(path, map_location):
+    r"""Load a published TorchScript archive without the jit deprecation warning.
+
+    Shipped models (MitoNet and others) are TorchScript ``.pth`` files.
+    ``torch.export`` cannot open them, so this stays on ``torch.jit.load``.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*torch\.jit\.(load|script|save).*",
+            category=FutureWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*torch\.jit\.(load|script|save).*",
+            category=DeprecationWarning,
+        )
+        return torch.jit.load(path, map_location=map_location)
+
 def load_model_to_device(fpath_or_url, device):
     # check whether local file or url
     if os.path.isfile(fpath_or_url):
-        model = torch.jit.load(fpath_or_url, map_location=device)
+        model = _load_torchscript(fpath_or_url, map_location=device)
     else:
         hub_dir = torch.hub.get_dir()
 
@@ -137,13 +193,22 @@ def load_model_to_device(fpath_or_url, device):
         filename = os.path.basename(parts.path)
         cached_file = os.path.join(hub_dir, filename)
 
+        if os.path.exists(cached_file) and not _is_complete_zip(cached_file):
+            sys.stderr.write(
+                f'Cached model "{cached_file}" is incomplete; downloading again.\n'
+            )
+            try:
+                os.remove(cached_file)
+            except OSError:
+                pass
+
         if not os.path.exists(cached_file):
             sys.stderr.write('Downloading: "{}" to {}\n'.format(fpath_or_url, cached_file))
             _download_with_retries(fpath_or_url, cached_file)
 
-        model = torch.jit.load(cached_file, map_location=device)
+        model = _load_torchscript(cached_file, map_location=device)
 
-    return model
+    return wrap_contiguous_encoder_features(model)
 
 def valid_url_or_file(fp):
     valid = False
