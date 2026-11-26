@@ -6,7 +6,7 @@ from skimage.draw import polygon
 
 from empanada.config_loaders import read_yaml
 from empanada_napari.inference import Engine2d
-from empanada_napari.utils import get_configs, abspath, enable_layer_rename_refresh, get_device
+from empanada_napari.utils import get_configs, abspath, enable_layer_rename_refresh, get_device, spatial_kwargs
 from empanada.array_utils import take
 
 from napari import Viewer
@@ -547,20 +547,9 @@ class SliceInferenceWidget:
     
     # ---------------- GUI result functions ----------------
     def _spatial_kwargs(self, offset=None):
-        # match the image layer's physical scale, position and units;
-        # offset is in data pixels, so convert it to world coordinates
-        scale = np.asarray(self.image_layer.scale, dtype=float)
-        translate = np.asarray(self.image_layer.translate, dtype=float)
-        if offset is not None:
-            translate = translate + np.asarray(offset, dtype=float) * scale
-
-        # oddly translate has to be a list and
-        # not an array or things break. WHY????
-        kwargs = {'scale': scale.tolist(), 'translate': translate.tolist()}
-        units = getattr(self.image_layer, 'units', None)  # napari >= 0.6
-        if units is not None:
-            kwargs['units'] = units
-        return kwargs
+        # place the segmentation with the image layer's whole transform;
+        # offset is in data pixels, as for a viewport or ROI crop
+        return spatial_kwargs(self.image_layer, offset)
 
     def _show_batch_stack(self, *args):
         stack = args[0]

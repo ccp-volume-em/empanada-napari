@@ -13,7 +13,7 @@ import torch
 from torch.backends.quantized import engine, supported_engines
 from empanada_napari.inference import Engine3d, tracker_consensus, stack_postprocessing
 from empanada_napari.multigpu import MultiGPUEngine3d
-from empanada_napari.utils import get_configs, abspath
+from empanada_napari.utils import get_configs, abspath, spatial_kwargs
 from empanada.config_loaders import read_yaml
 
 quantized_supported = True
@@ -261,25 +261,19 @@ class VolumeInferenceWidget:
                     'box': label_attrs['box'],
                     'area': label_attrs['runs'].sum(),
                 }
-        translate = self.image_layer.translate
-        scale = self.image_layer.scale
-        units = getattr(self.image_layer, 'units', None)  # napari >= 0.6
+        # the segmentation has no channel axis, so leave one out of the transform
+        axes = list(range(len(self.image_layer.scale)))
         ndim = self.image_layer.data[0].ndim if self.image_layer.multiscale else self.image_layer.data.ndim
         if ndim:
             shape = self.image_layer.data.shape
             if shape[0] in [1, 3, 4]:
-                translate = translate[1:]
-                scale = scale[1:]
-                units = units[1:] if units is not None else None
+                axes = axes[1:]
             elif shape[-1] in [1, 3, 4]:
-                translate = translate[:-1]
-                scale = scale[:-1]
-                units = units[:-1] if units is not None else None
-        kwargs = {'units': units} if units is not None else {}
+                axes = axes[:-1]
         self.viewer.add_labels(
             mask, name=f'{self.image_layer.name}-{description}',
-            visible=True, metadata=metadata, translate=translate,
-            scale=scale, **kwargs
+            visible=True, metadata=metadata,
+            **spatial_kwargs(self.image_layer, axes=axes)
         )
         self.pbar.hide()
 
