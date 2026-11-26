@@ -336,6 +336,52 @@ def enable_layer_rename_refresh(gui, viewer=None):
     _try_watch()
     return gui
 
+def spatial_kwargs(layer, offset=None, axes=None):
+    """Return the layer arguments that put a segmentation exactly over ``layer``.
+
+    A segmentation is computed from the image's pixels, so it has to be
+    placed with all of the image layer's transform: its scale, translate,
+    rotate, shear and affine, and units for the axes.
+
+    ``offset`` is where the segmentation's first pixel sits in the image's
+    pixels, as for a crop to the viewport or an ROI. It is turned into a shift
+    of the translate through the image's scale, shear and rotation, so a crop
+    of a rotated image lands where it was cut from.
+
+    ``axes`` lists the image axes the segmentation has, in order, when it has
+    fewer than the image (such as without a channel axis). By default it has
+    all of them.
+    """
+    from napari.utils.transforms import Affine
+
+    ndim = len(layer.scale)
+    axes = list(range(ndim)) if axes is None else list(axes)
+    rotate = np.asarray(layer.rotate, dtype=float)
+    shear = Affine(shear=layer.shear, ndim=ndim).linear_matrix
+    translate = np.asarray(layer.translate, dtype=float)
+    if offset is not None:
+        shift = np.zeros(ndim)
+        shift[axes] = np.asarray(offset, dtype=float)
+        translate = translate + rotate @ shear @ (shift * np.asarray(layer.scale, dtype=float))
+
+    square = np.ix_(axes, axes)
+    affine = np.asarray(layer.affine.affine_matrix, dtype=float)
+    homogeneous = axes + [ndim]
+
+    # oddly translate has to be a list and
+    # not an array or things break. WHY????
+    kwargs = {
+        'scale': np.asarray(layer.scale, dtype=float)[axes].tolist(),
+        'translate': translate[axes].tolist(),
+        'rotate': rotate[square],
+        'shear': shear[square],
+        'affine': affine[np.ix_(homogeneous, homogeneous)],
+    }
+    units = getattr(layer, 'units', None)  # napari >= 0.6
+    if units is not None:
+        kwargs['units'] = tuple(units[i] for i in axes)
+    return kwargs
+
 def normalize(img, mean, std, max_pixel_value=255.0):
     mean = np.array(mean, dtype=np.float32)
     mean *= max_pixel_value
