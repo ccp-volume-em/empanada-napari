@@ -31,6 +31,7 @@ dependencies = [
     "cztile>=2.0.0",
     "imagecodecs",
     "imagehash",
+    "joblib",
     "napari>=0.10",
     "numba>=0.58.1",
     "numpy>=1.22",
